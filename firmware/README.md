@@ -18,7 +18,7 @@ idf.py build
 - `bootloader/bootloader.bin`：Bootloader
 - `partition_table/partition-table.bin`：分区表
 
-当前 Web 内置镜像由 ESP-IDF 5.5.2 与 GCC 14.2.0 构建并校验。v1.1.1 应用包含 Wi‑Fi/BLE 控制器、NVS 配置和局刷 RAM 基线恢复，镜像大小为 `0xB0760` 字节（约 706 KiB），仍低于 `0x1F0000` 的应用分区上限。
+当前 Web 内置镜像由 ESP-IDF 5.5.2 与 GCC 14.2.0 构建并校验。v1.1.2 应用包含 Wi‑Fi/BLE 控制器、NVS 配置和局刷 RAM 基线恢复，镜像大小为 `0xB0760` 字节（约 706 KiB），仍低于 `0x1F0000` 的应用分区上限。
 
 ## 生成浏览器固件
 
@@ -62,6 +62,7 @@ shasum -a 256 ../web/public/firmware/inklink-quote0-full.bin
 - NVS 命名空间为 `inklink`，保存 Wi‑Fi/BLE 开关、数据读取、屏幕刷新、强制全刷间隔和局刷开关。
 - Wi‑Fi 和 BLE 默认关闭；网页可启停底层控制器。固件没有 Wi‑Fi 入网凭据界面、IP 服务或 BLE GATT 应用。
 - 默认数据读取 30 秒、屏幕更新 60 秒、强制全刷 30 分钟。网页保持打开并连接时执行定时读取和发送。
+- 网页以 `auto` 模式发送完整帧，局刷/全刷的最终决策由固件状态完成；断开并重连 Web Serial 不会重置策略，设备重启后则安全全刷一次。
 - 首帧、方向变化、局刷关闭、变化区域达到 75%、到达全刷间隔或累计 10 次局刷会强制全屏刷新。
 
 ## 设计约束

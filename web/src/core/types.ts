@@ -95,12 +95,13 @@ export interface DeviceConfig {
   };
 }
 
-export type RefreshMode = "full" | "partial";
+export type RefreshMode = "full" | "partial" | "auto";
+export type AppliedRefreshMode = Exclude<RefreshMode, "auto">;
 
 export interface FrameResponse extends DeviceResponse {
   type: "frame";
   ok: true;
-  mode: "none" | RefreshMode;
+  mode: "none" | AppliedRefreshMode;
   refreshMs: number;
   partialCount: number;
   region: {

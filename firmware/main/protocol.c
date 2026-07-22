@@ -17,7 +17,7 @@
 #include "sensors.h"
 
 #define PROTOCOL_VERSION 2
-#define FIRMWARE_VERSION "1.1.1"
+#define FIRMWARE_VERSION "1.1.2"
 #define LINE_BUFFER_SIZE 256
 #define RX_CHUNK_SIZE 512
 #define FRAME_RECEIVE_TIMEOUT_US (10LL * 1000LL * 1000LL)
@@ -357,7 +357,11 @@ static void begin_frame(const char *line)
     }
     if (strcmp(mode, "full") != 0 && strcmp(mode, "partial") != 0 &&
         strcmp(mode, "auto") != 0) {
-        send_error((uint32_t)request_id, "BAD_REFRESH_MODE", "mode must be full or partial");
+        send_error(
+            (uint32_t)request_id,
+            "BAD_REFRESH_MODE",
+            "mode must be full, partial, or auto"
+        );
         return;
     }
     if (rotation != EPD_ROTATE_90 && rotation != EPD_ROTATE_270) {

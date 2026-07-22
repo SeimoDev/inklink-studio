@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import { FRAME_BYTES, SCREEN_HEIGHT, SCREEN_WIDTH } from "../src/core/types";
-import { changedRegion } from "../src/device/refresh";
+import { changedRegion, refreshRequestMode } from "../src/device/refresh";
+
+describe("refreshRequestMode", () => {
+  it("keeps device-managed refresh policy independent of a browser baseline", () => {
+    expect(refreshRequestMode(true, true)).toBe("auto");
+  });
+
+  it("forces full refresh when partial refresh is disabled or unsupported", () => {
+    expect(refreshRequestMode(true, false)).toBe("full");
+    expect(refreshRequestMode(false, true)).toBe("full");
+  });
+});
 
 describe("changedRegion", () => {
   it("returns the full screen without a baseline", () => {

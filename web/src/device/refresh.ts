@@ -1,10 +1,22 @@
-import { FRAME_BYTES, SCREEN_HEIGHT, SCREEN_WIDTH } from "../core/types";
+import {
+  FRAME_BYTES,
+  SCREEN_HEIGHT,
+  SCREEN_WIDTH,
+  type RefreshMode,
+} from "../core/types";
 
 export interface ChangedRegion {
   x: number;
   y: number;
   width: number;
   height: number;
+}
+
+export function refreshRequestMode(
+  supportsPartial: boolean,
+  partialRefreshEnabled: boolean,
+): RefreshMode {
+  return supportsPartial && partialRefreshEnabled ? "auto" : "full";
 }
 
 export function changedRegion(

@@ -30,7 +30,7 @@ HELLO 1\n
 ```
 
 ```json
-{"type":"hello","id":1,"ok":true,"protocol":2,"firmware":"1.1.1","board":"MindReset Quote/0","panel":"UC8251D","width":296,"height":152,"frameBytes":5624,"rotations":[90,270],"flashBytes":4194304,"capabilities":{"deviceConfig":true,"partialRefresh":true,"wifiSwitch":true,"bluetoothSwitch":true},"maxPartialRefreshes":10,"sensors":["battery_mv","battery_percent","chip_temperature_c","vbus_present","uptime_s","free_heap"]}
+{"type":"hello","id":1,"ok":true,"protocol":2,"firmware":"1.1.2","board":"MindReset Quote/0","panel":"UC8251D","width":296,"height":152,"frameBytes":5624,"rotations":[90,270],"flashBytes":4194304,"capabilities":{"deviceConfig":true,"partialRefresh":true,"wifiSwitch":true,"bluetoothSwitch":true},"maxPartialRefreshes":10,"sensors":["battery_mv","battery_percent","chip_temperature_c","vbus_present","uptime_s","free_heap"]}
 ```
 
 `INFO id` 是别名，响应类型仍为 `hello`。`PING id` 返回 `pong`。
@@ -78,7 +78,7 @@ SET_CONFIG 4 1 0 30000 60000 1800000 1\n
 ## 发送画面
 
 ```text
-FRAME <id> <length> <crc32-hex> <rotation> [full|partial]\n
+FRAME <id> <length> <crc32-hex> <rotation> [full|partial|auto]\n
 ```
 
 省略刷新模式时按 `full` 处理，兼容协议 v1。设备验证头部后回复：
@@ -96,7 +96,8 @@ FRAME <id> <length> <crc32-hex> <rotation> [full|partial]\n
 刷新策略：
 
 - `full` 始终执行全屏刷新。
-- `partial` 是请求而不是强制命令。固件根据上一帧计算真实变化边界，并按 UC8251D 的 8 像素源线边界对齐。
+- `partial` 和 `auto` 都表示允许固件按设备中保存的策略选择刷新方式，而不是强制局刷。网页使用 `auto`，因此断开和重新连接 Web Serial 不会重置局刷/全刷策略。
+- 固件根据上一帧计算真实变化边界，并按 UC8251D 的 8 像素源线边界对齐。
 - 首帧、方向变化、未启用局刷、变化区域达到屏幕 75%、达到全刷时间或累计 10 次局刷时自动降级为全刷。
 - 像素完全相同且无需维护性全刷时返回 `mode:"none"`，不驱动屏幕。
 - `region` 使用网页横向坐标；实际窗口可能因 8 像素对齐稍大于网页计算的像素变化范围。
@@ -118,7 +119,7 @@ CLEAR 6\n
 | `BAD_FRAME_HEADER` | FRAME 头格式错误 |
 | `BAD_FRAME_SIZE` | 长度不是 5,624 字节 |
 | `BAD_ROTATION` | 方向不是 90 或 270 |
-| `BAD_REFRESH_MODE` | 模式不是 full/partial |
+| `BAD_REFRESH_MODE` | 模式不是 full/partial/auto |
 | `CRC_MISMATCH` | 二进制内容和 CRC 不一致 |
 | `FRAME_TIMEOUT` | 帧接收中断超过 10 秒 |
 | `DISPLAY_FAILED` | 屏幕初始化、SPI 或 BUSY 等待失败 |

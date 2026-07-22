@@ -19,7 +19,7 @@ import {
   sha256Hex,
   validateFullFirmware,
 } from "./device/flasher";
-import { changedRegion, copyFrame } from "./device/refresh";
+import { changedRegion, copyFrame, refreshRequestMode } from "./device/refresh";
 import {
   formatSensorReading,
   KNOWN_SENSOR_KEYS,
@@ -64,8 +64,6 @@ let customSensors: SensorValues = {};
 let imageLoaded = false;
 let inspectorSyncing = false;
 let lastSentFrame: Uint8Array | null = null;
-let lastSentRotation: ScreenRotation | null = null;
-let lastFullRefreshAt = 0;
 let dataRefreshTimer: number | null = null;
 let screenRefreshTimer: number | null = null;
 let automaticScreenRefreshRunning = false;
@@ -564,34 +562,22 @@ async function sendCurrentFrame(
     const frame = editor.getFrame();
     const currentRotation = rotation();
     const changed = changedRegion(lastSentFrame, frame);
-    const fullRefreshDue =
-      lastFullRefreshAt === 0 ||
-      (deviceConfig !== null && Date.now() - lastFullRefreshAt >= deviceConfig.fullRefreshMs);
-    if (changed === null && !fullRefreshDue) {
-      setSendStatus("无需刷新", "画面像素没有变化", "ready");
-      return null;
-    }
-
-    const canUsePartial =
-      changed !== null &&
-      !fullRefreshDue &&
-      lastSentFrame !== null &&
-      lastSentRotation === currentRotation &&
-      deviceInfo?.capabilities?.partialRefresh === true &&
-      deviceConfig?.partialRefreshEnabled === true;
-    const requestedMode = canUsePartial ? "partial" : "full";
+    const requestedMode = refreshRequestMode(
+      deviceInfo?.capabilities?.partialRefresh === true,
+      deviceConfig?.partialRefreshEnabled === true,
+    );
     setSendStatus(
-      requestedMode === "partial" ? "正在局部更新" : "正在全屏更新",
-      requestedMode === "partial"
-        ? `变化区域 ${changed?.width ?? 0}×${changed?.height ?? 0}，正在发送画面`
+      requestedMode === "auto" ? "正在按设备策略更新" : "正在全屏更新",
+      requestedMode === "auto"
+        ? changed === null
+          ? "画面未变化，设备将判断跳过或执行维护性全刷"
+          : `变化区域 ${changed.width}×${changed.height}，设备将判断局刷或全刷`
         : "正在传输 5,624 字节画面",
       "busy",
     );
 
     const response = await serial.sendFrame(frame, currentRotation, requestedMode);
     lastSentFrame = copyFrame(frame);
-    lastSentRotation = currentRotation;
-    if (response.mode === "full") lastFullRefreshAt = Date.now();
     const detail = describeFrameResponse(response);
     setSendStatus("发送完成", detail, "ready");
     if (notify) toast(detail);
@@ -611,9 +597,6 @@ async function connectOrDisconnect(): Promise<void> {
       deviceInfo = null;
       deviceConfig = null;
       liveSensors = {};
-      lastSentFrame = null;
-      lastSentRotation = null;
-      lastFullRefreshAt = 0;
       stopRefreshSchedulers();
       showDeviceInfo(null);
       applySensors();
@@ -822,8 +805,6 @@ button("clearBtn").addEventListener("click", () => {
     try {
       await serial.clear();
       lastSentFrame = new Uint8Array(5624).fill(0xff);
-      lastSentRotation = 90;
-      lastFullRefreshAt = Date.now();
       setSendStatus("屏幕已清空", "编辑器内容仍然保留", "ready");
       toast("设备屏幕已清空");
     } catch (error) {
@@ -987,9 +968,6 @@ serial.onConnectionChange = (connected) => {
   if (!connected) {
     deviceInfo = null;
     deviceConfig = null;
-    lastSentFrame = null;
-    lastSentRotation = null;
-    lastFullRefreshAt = 0;
     stopRefreshSchedulers();
     showDeviceInfo(null);
     element("configMessage").textContent = "连接设备后自动读取当前配置。";
