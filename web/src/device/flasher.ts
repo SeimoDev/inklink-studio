@@ -7,6 +7,10 @@ import {
 } from "../core/release";
 
 export const QUOTE0_FLASH_BYTES = 4 * 1024 * 1024;
+export const BACKUP_BAUD_RATES = [230400, 115200] as const;
+const FLASH_BAUD_RATE = 460800;
+const FLASH_READ_BLOCK_BYTES = 0x1000;
+const FLASH_READ_PACKET_BYTES = 1024;
 export { BUILT_IN_FIRMWARE_SHA256, BUILT_IN_FIRMWARE_URL };
 
 export type FlasherPhase = "connect" | "backup" | "flash" | "reset";
@@ -25,6 +29,76 @@ export interface BackupResult {
 
 type ProgressHandler = (progress: FlasherProgress) => void;
 type LogHandler = (line: string) => void;
+type FlashReadProgressHandler = (packet: Uint8Array, received: number, total: number) => void;
+
+type FlashReaderLoader = Pick<
+  ESPLoader,
+  "ESP_READ_FLASH" | "FLASH_READ_TIMEOUT" | "_intToByteArray" | "checkCommand" | "transport"
+>;
+
+function concatBytes(parts: Uint8Array[]): Uint8Array {
+  const length = parts.reduce((total, part) => total + part.length, 0);
+  const result = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.length;
+  }
+  return result;
+}
+
+/**
+ * Read flash into one preallocated buffer. esptool-js 0.6.0 grows its result
+ * by copying all previously received bytes for every 1 KB packet; a full
+ * 4 MB backup therefore performs gigabytes of avoidable copying and can miss
+ * the stub's next acknowledgement deadline.
+ */
+export async function readFlashStable(
+  loader: FlashReaderLoader,
+  address: number,
+  size: number,
+  onPacketReceived?: FlashReadProgressHandler,
+): Promise<Uint8Array> {
+  if (!Number.isInteger(address) || address < 0 || !Number.isInteger(size) || size <= 0) {
+    throw new Error("Flash 读取范围无效");
+  }
+
+  const request = concatBytes([
+    loader._intToByteArray(address),
+    loader._intToByteArray(size),
+    loader._intToByteArray(FLASH_READ_BLOCK_BYTES),
+    loader._intToByteArray(FLASH_READ_PACKET_BYTES),
+  ]);
+  const response = await loader.checkCommand("read flash", loader.ESP_READ_FLASH, request);
+  if (typeof response !== "number" || response !== 0) {
+    throw new Error(`Flash 读取启动失败：${String(response)}`);
+  }
+
+  const data = new Uint8Array(size);
+  let received = 0;
+  while (received < size) {
+    const packet = await loader.transport.read(loader.FLASH_READ_TIMEOUT);
+    if (packet.length === 0) throw new Error("设备返回了空的 Flash 数据包");
+    if (packet.length > size - received) {
+      throw new Error(`Flash 数据超出预期长度（${received + packet.length} > ${size}）`);
+    }
+    data.set(packet, received);
+    received += packet.length;
+    await loader.transport.write(loader._intToByteArray(received));
+    onPacketReceived?.(packet, received, size);
+  }
+  return data;
+}
+
+export function isRetryableSerialReadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return [
+    "Serial data stream stopped",
+    "No serial data received",
+    "Invalid head of packet",
+    "Invalid SLIP escape",
+  ].some((fragment) => message.includes(fragment));
+}
 
 export function validateFullFirmware(image: Uint8Array): void {
   if (image.length < 0x10001) {
@@ -75,18 +149,38 @@ export class BrowserFlasher {
   ) {}
 
   async backup(port?: SerialPort): Promise<BackupResult> {
-    return this.withLoader(async (loader, chip, flashSize) => {
-      this.onProgress({ phase: "backup", percent: 0, detail: "正在读取整颗 4 MB Flash" });
-      const data = await loader.readFlash(0, QUOTE0_FLASH_BYTES, (_packet, progress, total) => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < BACKUP_BAUD_RATES.length; attempt += 1) {
+      const baudrate = BACKUP_BAUD_RATES[attempt];
+      try {
+        return await this.withLoader(async (loader, chip, flashSize) => {
+          this.onProgress({
+            phase: "backup",
+            percent: 0,
+            detail: `正在读取整颗 4 MB Flash · ${baudrate} baud`,
+          });
+          const data = await readFlashStable(loader, 0, QUOTE0_FLASH_BYTES, (_packet, progress, total) => {
+            this.onProgress({
+              phase: "backup",
+              percent: total > 0 ? (progress / total) * 100 : 0,
+              detail: `已读取 ${(progress / 1024 / 1024).toFixed(2)} / ${(total / 1024 / 1024).toFixed(2)} MB`,
+            });
+          });
+          this.onProgress({ phase: "backup", percent: 100, detail: "备份读取完成" });
+          return { data, chip, flashSize };
+        }, port, baudrate);
+      } catch (error) {
+        lastError = error;
+        const canRetry = attempt + 1 < BACKUP_BAUD_RATES.length && isRetryableSerialReadError(error);
+        if (!canRetry) throw error;
         this.onProgress({
-          phase: "backup",
-          percent: total > 0 ? (progress / total) * 100 : 0,
-          detail: `已读取 ${(progress / 1024 / 1024).toFixed(2)} / ${(total / 1024 / 1024).toFixed(2)} MB`,
+          phase: "connect",
+          percent: 0,
+          detail: "串口读取中断，正在以 115200 baud 自动重试",
         });
-      });
-      this.onProgress({ phase: "backup", percent: 100, detail: "备份读取完成" });
-      return { data, chip, flashSize };
-    }, port);
+      }
+    }
+    throw lastError;
   }
 
   async flash(image: Uint8Array, port?: SerialPort): Promise<{ chip: string; flashSize: string }> {
@@ -111,12 +205,13 @@ export class BrowserFlasher {
       });
       this.onProgress({ phase: "flash", percent: 100, detail: "固件写入完成" });
       return { chip, flashSize };
-    }, port);
+    }, port, FLASH_BAUD_RATE);
   }
 
   private async withLoader<T>(
     operation: (loader: ESPLoader, chip: string, flashSize: string) => Promise<T>,
     selectedPort?: SerialPort,
+    baudrate = FLASH_BAUD_RATE,
   ): Promise<T> {
     if (!window.isSecureContext || !navigator.serial) {
       throw new Error("浏览器刷写需要桌面版 Chrome/Edge，并通过 localhost 或 HTTPS 打开");
@@ -134,7 +229,7 @@ export class BrowserFlasher {
     };
     const loader = new ESPLoader({
       transport,
-      baudrate: 460800,
+      baudrate,
       terminal,
       debugLogging: false,
     });

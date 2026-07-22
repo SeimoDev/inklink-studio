@@ -14,6 +14,7 @@ import type {
 } from "./core/types";
 import {
   BrowserFlasher,
+  isRetryableSerialReadError,
   loadBuiltInFirmware,
   sha256Hex,
   validateFullFirmware,
@@ -72,6 +73,24 @@ let frameSendRunning = false;
 let sensorRefreshPromise: Promise<void> | null = null;
 let customFirmwareFile: File | null = null;
 let firmwareOperationRunning = false;
+let backupDownloadUrl: string | null = null;
+
+interface BackupWritableFile {
+  write(data: Blob): Promise<void>;
+  close(): Promise<void>;
+  abort?(): Promise<void>;
+}
+
+interface BackupFileHandle {
+  createWritable(): Promise<BackupWritableFile>;
+}
+
+interface BackupPickerWindow extends Window {
+  showSaveFilePicker?: (options: {
+    suggestedName: string;
+    types: Array<{ description: string; accept: Record<string, string[]> }>;
+  }) => Promise<BackupFileHandle>;
+}
 
 function combinedSensors(): SensorValues {
   return { ...liveSensors, ...customSensors };
@@ -94,8 +113,64 @@ function download(blob: Blob, filename: string): void {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = filename;
+  anchor.hidden = true;
+  document.body.append(anchor);
   anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function clearBackupDownload(): void {
+  if (backupDownloadUrl) URL.revokeObjectURL(backupDownloadUrl);
+  backupDownloadUrl = null;
+  const link = element<HTMLAnchorElement>("backupDownloadLink");
+  link.hidden = true;
+  link.removeAttribute("href");
+  link.removeAttribute("download");
+}
+
+async function chooseBackupDestination(filename: string): Promise<BackupFileHandle | null> {
+  const pickerWindow = window as BackupPickerWindow;
+  if (!pickerWindow.showSaveFilePicker) return null;
+  return pickerWindow.showSaveFilePicker({
+    suggestedName: filename,
+    types: [{
+      description: "ESP32 Flash 备份",
+      accept: { "application/octet-stream": [".bin"] },
+    }],
+  });
+}
+
+async function saveBackup(
+  blob: Blob,
+  filename: string,
+  handle: BackupFileHandle | null,
+): Promise<"saved" | "download"> {
+  clearBackupDownload();
+  if (handle) {
+    const writable = await handle.createWritable();
+    let closed = false;
+    try {
+      await writable.write(blob);
+      await writable.close();
+      closed = true;
+    } finally {
+      if (!closed) await writable.abort?.();
+    }
+    return "saved";
+  }
+
+  backupDownloadUrl = URL.createObjectURL(blob);
+  const link = element<HTMLAnchorElement>("backupDownloadLink");
+  link.href = backupDownloadUrl;
+  link.download = filename;
+  link.hidden = false;
+  link.click();
+  return "download";
 }
 
 function timestamp(): string {
@@ -557,10 +632,14 @@ async function connectOrDisconnect(): Promise<void> {
   }
 }
 
-function setFirmwareBusy(busy: boolean): void {
+function setFirmwareBusy(busy: boolean, operation: "backup" | "flash" | null = null): void {
   firmwareOperationRunning = busy;
-  button("backupFirmwareBtn").disabled = busy || !serial.supported;
-  button("flashFirmwareBtn").disabled = busy || !serial.supported;
+  const backup = button("backupFirmwareBtn");
+  const flash = button("flashFirmwareBtn");
+  backup.disabled = busy || !serial.supported;
+  flash.disabled = busy || !serial.supported;
+  backup.textContent = busy && operation === "backup" ? "正在备份…" : "备份当前固件";
+  flash.textContent = busy && operation === "flash" ? "正在刷写…" : "刷写固件";
   button("chooseFirmwareBtn").disabled = busy;
   button("useBuiltInFirmwareBtn").disabled = busy;
   button("connectBtn").disabled = busy || !serial.supported;
@@ -778,21 +857,39 @@ firmwareFileInput.addEventListener("change", () => {
 button("backupFirmwareBtn").addEventListener("click", () => {
   if (firmwareOperationRunning) return;
   if (!window.confirm("将读取并下载设备整颗 4 MB Flash。备份可能包含网络凭据，是否继续？")) return;
-  setFirmwareBusy(true);
-  const portPromise = firmwareOperationPort();
+  setFirmwareBusy(true, "backup");
+  element("flashProgressWrap").hidden = false;
+  element<HTMLProgressElement>("flashProgress").value = 0;
+  element("flashStatus").textContent = "请选择备份文件的保存位置";
   void (async () => {
-    const port = await portPromise;
+    const filename = `quote0-backup-${timestamp()}.bin`;
+    const saveHandle = await chooseBackupDestination(filename);
+    const port = await firmwareOperationPort();
     const result = await browserFlasher.backup(port);
     const hash = await sha256Hex(result.data);
     const blobData = result.data.slice().buffer as ArrayBuffer;
-    download(new Blob([blobData], { type: "application/octet-stream" }), `quote0-backup-${timestamp()}.bin`);
-    element("flashStatus").textContent = `备份完成 · SHA-256 ${hash}`;
-    toast("4 MB 固件备份已下载");
+    const destination = await saveBackup(
+      new Blob([blobData], { type: "application/octet-stream" }),
+      filename,
+      saveHandle,
+    );
+    element<HTMLProgressElement>("flashProgress").value = 100;
+    element("flashStatus").textContent = destination === "saved"
+      ? `备份完成并已保存 · SHA-256 ${hash}`
+      : `备份完成 · SHA-256 ${hash} · 如未自动下载，请点击下方链接`;
+    toast(destination === "saved" ? "4 MB 固件备份已保存" : "4 MB 固件备份已准备下载");
   })()
     .catch((error) => {
+      if (isAbortError(error)) {
+        element("flashStatus").textContent = "已取消固件备份";
+        return;
+      }
       element("flashProgressWrap").hidden = false;
-      element("flashStatus").textContent = `备份失败：${errorMessage(error)}`;
-      toast(errorMessage(error), "error");
+      const message = isRetryableSerialReadError(error)
+        ? "串口读取连续中断。请关闭其他串口工具、使用 USB 直连数据线后重试。"
+        : errorMessage(error);
+      element("flashStatus").textContent = `备份失败：${message}`;
+      toast(message, "error");
     })
     .finally(() => setFirmwareBusy(false));
 });
@@ -801,7 +898,7 @@ button("flashFirmwareBtn").addEventListener("click", () => {
   if (firmwareOperationRunning) return;
   const source = customFirmwareFile ? customFirmwareFile.name : BUILT_IN_FIRMWARE_LABEL;
   if (!window.confirm(`即将用“${source}”覆盖设备固件。请确认目标是 Quote/0 ESP32-C3，是否继续？`)) return;
-  setFirmwareBusy(true);
+  setFirmwareBusy(true, "flash");
   const portPromise = firmwareOperationPort();
   void (async () => {
     const port = await portPromise;

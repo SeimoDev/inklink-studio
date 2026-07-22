@@ -26,13 +26,16 @@
 html {
   min-width: 320px;
   min-height: 100%;
+  overflow-x: hidden;
   background: #f3efe5;
+  overscroll-behavior-y: none;
 }
 
 body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at 50% -20%, rgb(255 255 255 / 85%), transparent 42%),
     #f3efe5;
@@ -149,6 +152,30 @@ textarea:focus-visible,
 
 .connection-cluster {
   gap: 14px;
+}
+
+.github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 9px;
+  text-decoration: none;
+  transition: color 140ms ease, background 140ms ease;
+}
+
+.github-link:hover {
+  color: var(--ink);
+  background: rgb(32 33 30 / 6%);
+}
+
+.github-link svg {
+  width: 16px;
+  height: 16px;
+  fill: currentcolor;
 }
 
 .connection-state {
@@ -433,6 +460,14 @@ h1 {
   min-height: 35px;
   padding-inline: 8px;
   font-size: 9px;
+}
+
+.backup-download-link {
+  display: inline-grid;
+  grid-column: 1 / -1;
+  place-items: center;
+  color: #3e6334;
+  text-decoration: none;
 }
 
 .flash-progress-wrap {
@@ -1281,12 +1316,43 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 @media (min-width: 1201px) {
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+  }
+
+  .topbar {
+    height: 74px;
+  }
+
+  .studio-layout {
+    height: calc(100vh - 74px);
+    height: calc(100dvh - 74px);
+    min-height: 0;
+  }
+
   .controls-panel,
   .inspector-panel {
-    max-height: calc(100vh - 74px);
-    overflow: auto;
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     scrollbar-width: thin;
     scrollbar-color: #c8c1b5 transparent;
+  }
+
+  .workspace {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 }
 
