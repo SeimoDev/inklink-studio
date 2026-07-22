@@ -18,7 +18,7 @@ idf.py build
 - `bootloader/bootloader.bin`：Bootloader
 - `partition_table/partition-table.bin`：分区表
 
-当前 Web 内置镜像由 ESP-IDF 5.5.2 与 GCC 14.2.0 构建并校验。v1.1.0 应用包含 Wi‑Fi/BLE 控制器和 NVS 配置，镜像大小为 `0xB0790` 字节（约 706 KiB），仍低于 `0x1F0000` 的应用分区上限。
+当前 Web 内置镜像由 ESP-IDF 5.5.2 与 GCC 14.2.0 构建并校验。v1.1.1 应用包含 Wi‑Fi/BLE 控制器、NVS 配置和局刷 RAM 基线恢复，镜像大小为 `0xB0760` 字节（约 706 KiB），仍低于 `0x1F0000` 的应用分区上限。
 
 ## 生成浏览器固件
 
@@ -68,7 +68,7 @@ shasum -a 256 ../web/public/firmware/inklink-quote0-full.bin
 
 - USB 接收缓冲区为 8 KiB，可容纳一帧；每帧仍必须通过 CRC32。
 - 屏幕 BUSY 等待最长 5 秒；每次采样前先发送 `GET_STATUS (0x71)`。二进制接收间隔最长 10 秒。
-- 每次刷新前写入 Quote/0 的 376 字节 UC8251D 波形 LUT。局刷使用 `0x91/0x90/0x92` 窗口命令，但不使用未经验证的快速波形。
+- 每次刷新前写入 Quote/0 的 376 字节 UC8251D 波形 LUT。局刷先恢复完整的新旧显示 RAM，再使用 `0x91/0x90/0x92` 限定物理扫描窗口，避免硬复位后窗口外变白；不使用未经验证的快速波形。
 - 刷屏结束后等待波形稳定 2.7 秒，发送 deep-sleep `0x07 A5`，再将屏幕电源 GPIO20 释放为高阻输入。
 - 第一次刷新使用全白旧帧；后续使用内存中的上一帧，并按真实像素差异计算局刷窗口。
 

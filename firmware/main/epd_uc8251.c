@@ -388,25 +388,6 @@ static void window_to_landscape(
     }
 }
 
-static esp_err_t epd_write_window(
-    uint8_t command,
-    const uint8_t *frame,
-    const native_window_t *window
-)
-{
-    ESP_RETURN_ON_ERROR(epd_command(command), "epd", "window data command");
-    const size_t first_byte = (size_t)window->x_start / 8;
-    const size_t byte_count = (size_t)(window->x_end - window->x_start + 1) / 8;
-    for (int y = window->y_start; y <= window->y_end; ++y) {
-        ESP_RETURN_ON_ERROR(
-            epd_data(frame + (size_t)y * EPD_NATIVE_STRIDE + first_byte, byte_count),
-            "epd",
-            "window data"
-        );
-    }
-    return ESP_OK;
-}
-
 static esp_err_t epd_update_full(void)
 {
     const uint8_t *old_frame = s_previous_valid ? s_previous_frame : NULL;
@@ -436,21 +417,29 @@ static esp_err_t epd_update_partial(const native_window_t *window)
         0x00, /* PT_SCAN=0: gate/source scan is restricted to this window. */
     };
 
+    /* Every update starts after hardware reset and panel power-up, so the
+     * UC8251D display RAM cannot be assumed to contain the previous frame.
+     * Rebuild both complete RAM planes before entering partial mode.  The
+     * 0x90 window still limits the physical gate scan to changed pixels, while
+     * pixels outside it retain valid old/new data instead of turning white. */
+    ESP_RETURN_ON_ERROR(epd_command(0x10), "epd", "partial old frame command");
+    ESP_RETURN_ON_ERROR(
+        epd_data(s_previous_frame, EPD_FRAME_BYTES),
+        "epd",
+        "partial old frame"
+    );
+    ESP_RETURN_ON_ERROR(epd_command(0x13), "epd", "partial new frame command");
+    ESP_RETURN_ON_ERROR(
+        epd_data(s_native_frame, EPD_FRAME_BYTES),
+        "epd",
+        "partial new frame"
+    );
+
     ESP_RETURN_ON_ERROR(epd_command(0x91), "epd", "partial in");
     ESP_RETURN_ON_ERROR(
         epd_command_data(0x90, partial_window, sizeof(partial_window)),
         "epd",
         "partial window"
-    );
-    ESP_RETURN_ON_ERROR(
-        epd_write_window(0x10, s_previous_frame, window),
-        "epd",
-        "partial old frame"
-    );
-    ESP_RETURN_ON_ERROR(
-        epd_write_window(0x13, s_native_frame, window),
-        "epd",
-        "partial new frame"
     );
     ESP_RETURN_ON_ERROR(epd_command(0x12), "epd", "partial refresh");
     vTaskDelay(pdMS_TO_TICKS(100));
