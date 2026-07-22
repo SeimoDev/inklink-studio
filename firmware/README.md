@@ -18,7 +18,7 @@ idf.py build
 - `bootloader/bootloader.bin`：Bootloader
 - `partition_table/partition-table.bin`：分区表
 
-当前 Web 内置镜像由 ESP-IDF 5.5.2 与 GCC 14.2.0 构建并校验。v1.2.0 应用包含 Wi‑Fi/BLE 控制器、NVS 配置、离线场景持久化、自主传感器渲染和局刷 RAM 基线恢复，镜像大小为 `0xB1C70` 字节（约 711 KiB），仍低于 `0x1F0000` 的应用分区上限。
+当前 Web 内置镜像由 ESP-IDF 5.5.2 与 GCC 14.2.0 构建并校验。v1.2.1 应用包含 Wi‑Fi/BLE 控制器、NVS 配置、离线场景持久化、自主传感器渲染和局刷 RAM 基线恢复；局刷 source 窗口会按面板扫描方向做垂直镜像。镜像大小为 `0xB1C80` 字节（约 711 KiB），仍低于 `0x1F0000` 的分区上限。
 
 ## 生成浏览器固件
 

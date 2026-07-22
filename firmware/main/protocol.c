@@ -19,7 +19,7 @@
 #include "sensors.h"
 
 #define PROTOCOL_VERSION 3
-#define FIRMWARE_VERSION "1.2.0"
+#define FIRMWARE_VERSION "1.2.1"
 #define LINE_BUFFER_SIZE 256
 #define RX_CHUNK_SIZE 512
 #define BINARY_RECEIVE_TIMEOUT_US (10LL * 1000LL * 1000LL)

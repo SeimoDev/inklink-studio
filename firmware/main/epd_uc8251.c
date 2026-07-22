@@ -407,9 +407,18 @@ static esp_err_t epd_update_full(void)
 
 static esp_err_t epd_update_partial(const native_window_t *window)
 {
+    /*
+     * UC8251D's partial-window source coordinates run opposite to the bit
+     * order used when writing the full 152-pixel RAM row. In landscape this
+     * is the vertical axis, so sending the RAM-space bounds directly scans
+     * the vertically mirrored area. Keep the frame data unchanged and mirror
+     * only the 0x90 source window.
+     */
+    const int controller_x_start = EPD_NATIVE_WIDTH - 1 - window->x_end;
+    const int controller_x_end = EPD_NATIVE_WIDTH - 1 - window->x_start;
     const uint8_t partial_window[] = {
-        (uint8_t)window->x_start,
-        (uint8_t)window->x_end,
+        (uint8_t)controller_x_start,
+        (uint8_t)controller_x_end,
         (uint8_t)((window->y_start >> 8) & 0x01),
         (uint8_t)(window->y_start & 0xff),
         (uint8_t)((window->y_end >> 8) & 0x01),

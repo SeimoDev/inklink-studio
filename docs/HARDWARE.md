@@ -69,6 +69,8 @@ Power on 后还需要写入 Quote/0 原厂的 376 字节全刷波形表：`0x20`
 
 原厂 Quote/0 应用中没有调用这三个局刷命令，因此本项目采用保守路径：沿用已经验证的 376 字节波形，只限制扫描窗口，不使用来源不明的“快速 LUT”。固件保留上一帧，在 MCU 中计算真实变化边界，并在首帧、方向变化、变化过大或达到用户设置的全刷时间时强制全刷。局刷次数仅用于诊断，不会偷偷覆盖全刷间隔。这样局刷的主要收益是减少无关区域闪动；单次用时不会像激进的快速波形那样大幅缩短。
 
+UC8251D 的 `0x90` source 窗口方向与完整帧 RAM 每行的位序相反。横屏下 source 轴就是画面的垂直轴，因此固件发送局刷窗口前使用 `controller_x_start = 151 - ram_x_end`、`controller_x_end = 151 - ram_x_start` 做垂直镜像；帧数据和网页坐标不翻转。
+
 参考资料：[HINK-E0266A85 模组规格](https://www.actron.de/wp-content/uploads/HINK-E0266A85-Spec-A0.pdf)、[UC8251D 控制器手册](https://www.buydisplay.com/download/ic/UC8251.pdf)、[Waveshare 2.66 英寸面板说明](https://www.waveshare.com/wiki/2.66inch_e-Paper_Module_Manual)。
 
 ## 坐标旋转

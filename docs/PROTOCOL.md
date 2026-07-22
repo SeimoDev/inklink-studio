@@ -30,7 +30,7 @@ HELLO 1\n
 ```
 
 ```json
-{"type":"hello","id":1,"ok":true,"protocol":3,"firmware":"1.2.0","board":"MindReset Quote/0","panel":"UC8251D","width":296,"height":152,"frameBytes":5624,"rotations":[90,270],"flashBytes":4194304,"capabilities":{"deviceConfig":true,"partialRefresh":true,"wifiSwitch":true,"bluetoothSwitch":true,"offlineSensorRefresh":true},"maxPartialRefreshes":0,"offlineSceneLoaded":true,"sensors":["battery_mv","battery_percent","chip_temperature_c","vbus_present","uptime_s","free_heap"]}
+{"type":"hello","id":1,"ok":true,"protocol":3,"firmware":"1.2.1","board":"MindReset Quote/0","panel":"UC8251D","width":296,"height":152,"frameBytes":5624,"rotations":[90,270],"flashBytes":4194304,"capabilities":{"deviceConfig":true,"partialRefresh":true,"wifiSwitch":true,"bluetoothSwitch":true,"offlineSensorRefresh":true},"maxPartialRefreshes":0,"offlineSceneLoaded":true,"sensors":["battery_mv","battery_percent","chip_temperature_c","vbus_present","uptime_s","free_heap"]}
 ```
 
 `INFO id` 是别名，响应类型仍为 `hello`。`offlineSceneLoaded` 表示设备当前已从 Flash 载入可自主刷新的场景。`PING id` 返回 `pong`。
