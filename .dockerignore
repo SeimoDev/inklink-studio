@@ -1,0 +1,12 @@
+.git
+.gitignore
+backups/
+docs/
+firmware/
+private/
+secrets/
+web/dist/
+web/node_modules/
+*.log
+.DS_Store
+

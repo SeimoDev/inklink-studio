@@ -45,6 +45,17 @@ npm run build
 
 更多前端开发信息见 [`web/README.md`](web/README.md)。
 
+## Docker 部署
+
+Docker 使用多阶段构建生成 Web 生产包，并由非 root Nginx 容器提供静态服务。默认映射宿主机 `19888` 端口：
+
+```sh
+docker compose up -d --build
+curl http://127.0.0.1:19888/healthz
+```
+
+如需更换宿主机端口，可在启动时设置 `INKLINK_PORT`。容器设置了健康检查、只读根文件系统和 `unless-stopped` 自动重启策略。
+
 ## 构建固件
 
 固件基线为 ESP-IDF 5.5.2：

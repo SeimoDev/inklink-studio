@@ -1,0 +1,20 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: inklink-studio:1.1.0
+    container_name: inklink-studio-web
+    restart: unless-stopped
+    ports:
+      - "${INKLINK_PORT:-19888}:8080"
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0755
+      - /var/run:rw,noexec,nosuid,size=1m,uid=101,gid=101,mode=0755
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 10s
+
