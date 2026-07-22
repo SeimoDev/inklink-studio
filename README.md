@@ -4,6 +4,10 @@ InkLink Studio 是 MindReset Quote/0（ESP32-C3 + 296×152 黑白墨水屏）的
 
 项目不依赖云服务或后端，也不再维护独立启动、刷写或恢复脚本。
 
+## 在线使用
+
+访问 [https://eink.seimo.cn](https://eink.seimo.cn)，使用桌面版 Chrome 或 Edge 通过 USB 连接设备。
+
 ## 工程结构
 
 ```text
