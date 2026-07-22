@@ -10,6 +10,7 @@ import type {
   ImageSettings,
   ProjectFile,
   ScreenRotation,
+  SensorLayer,
   SensorValues,
 } from "./core/types";
 import {
@@ -20,6 +21,7 @@ import {
   validateFullFirmware,
 } from "./device/flasher";
 import { changedRegion, copyFrame, refreshRequestMode } from "./device/refresh";
+import { buildOfflineScene } from "./device/offline-scene";
 import {
   formatSensorReading,
   KNOWN_SENSOR_KEYS,
@@ -206,6 +208,15 @@ function setConnectedUi(connected: boolean): void {
 function showDeviceInfo(info: DeviceInfo | null): void {
   const details = element<HTMLDListElement>("deviceDetails");
   const message = element("deviceMessage");
+  const offlineRefresh = info?.capabilities?.offlineSensorRefresh === true;
+  element("autoRefreshTitle").textContent = offlineRefresh
+    ? "设备离线自动更新"
+    : "网页自动更新";
+  element("autoRefreshHint").textContent = offlineRefresh
+    ? "发送画面后，断开 Web 或 USB 仍生效"
+    : "兼容旧固件，网页连接时生效";
+  input("autoRefreshInput").disabled = offlineRefresh;
+  if (offlineRefresh) input("autoRefreshInput").checked = true;
   if (!info) {
     details.hidden = true;
     message.hidden = false;
@@ -316,6 +327,8 @@ function restartRefreshSchedulers(): void {
       element("configMessage").textContent = `自动读取失败：${errorMessage(error)}`;
     });
   }, deviceConfig.dataRefreshMs);
+
+  if (deviceInfo?.capabilities?.offlineSensorRefresh === true) return;
 
   screenRefreshTimer = window.setInterval(() => {
     if (!input("autoRefreshInput").checked || automaticScreenRefreshRunning) return;
@@ -559,8 +572,26 @@ async function sendCurrentFrame(
   send.disabled = true;
   try {
     if (refreshSensorsFirst) await refreshSensors();
-    const frame = editor.getFrame();
     const currentRotation = rotation();
+    if (deviceInfo?.capabilities?.offlineSensorRefresh === true) {
+      const sensorLayers = editor.layers.filter(
+        (layer): layer is SensorLayer => layer.type === "sensor",
+      );
+      setSendStatus(
+        "正在同步离线刷新场景",
+        "设备断开 Web 后将继续自行采样并按已保存策略刷新",
+        "busy",
+      );
+      const scene = buildOfflineScene(
+        editor.getStaticFrame(),
+        currentRotation,
+        sensorLayers,
+        combinedSensors(),
+      );
+      await serial.sendScene(scene);
+    }
+
+    const frame = editor.getFrame();
     const changed = changedRegion(lastSentFrame, frame);
     const requestedMode = refreshRequestMode(
       deviceInfo?.capabilities?.partialRefresh === true,

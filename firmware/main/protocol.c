@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "crc32.h"
@@ -13,15 +14,15 @@
 #include "esp_err.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "offline_scene.h"
 #include "radios.h"
 #include "sensors.h"
 
-#define PROTOCOL_VERSION 2
-#define FIRMWARE_VERSION "1.1.2"
+#define PROTOCOL_VERSION 3
+#define FIRMWARE_VERSION "1.2.0"
 #define LINE_BUFFER_SIZE 256
 #define RX_CHUNK_SIZE 512
-#define FRAME_RECEIVE_TIMEOUT_US (10LL * 1000LL * 1000LL)
-#define MAX_PARTIAL_REFRESHES 10U
+#define BINARY_RECEIVE_TIMEOUT_US (10LL * 1000LL * 1000LL)
 
 typedef struct {
     bool active;
@@ -31,15 +32,34 @@ typedef struct {
     size_t received_length;
     epd_rotation_t rotation;
     bool request_partial;
+    bool preserve_offline_scene;
     int64_t last_byte_time_us;
 } frame_receive_state_t;
 
+typedef struct {
+    bool active;
+    uint32_t request_id;
+    uint32_t expected_crc;
+    size_t expected_length;
+    size_t received_length;
+    uint8_t *data;
+    int64_t last_byte_time_us;
+} scene_receive_state_t;
+
 static uint8_t s_frame[EPD_FRAME_BYTES];
+static uint8_t s_offline_frame[EPD_FRAME_BYTES];
 static frame_receive_state_t s_frame_state;
+static scene_receive_state_t s_scene_state;
 static char s_line[LINE_BUFFER_SIZE];
 static size_t s_line_length;
 static int64_t s_last_full_refresh_us;
+static int64_t s_last_screen_refresh_us;
+static int64_t s_last_sensor_read_us;
 static uint32_t s_partial_refresh_count;
+static sensor_snapshot_t s_offline_sensors;
+static bool s_offline_sensors_valid;
+static int64_t s_scene_for_next_frame_until_us;
+static int64_t s_offline_refresh_not_before_us;
 
 static void serial_write_all(const void *data, size_t length)
 {
@@ -97,8 +117,9 @@ static void send_info(uint32_t request_id)
         "\"flashBytes\":4194304,"
         "\"capabilities\":{\"deviceConfig\":true,"
         "\"partialRefresh\":true,\"wifiSwitch\":true,"
-        "\"bluetoothSwitch\":true},"
-        "\"maxPartialRefreshes\":%u,"
+        "\"bluetoothSwitch\":true,\"offlineSensorRefresh\":true},"
+        "\"maxPartialRefreshes\":0,"
+        "\"offlineSceneLoaded\":%s,"
         "\"sensors\":[\"battery_mv\",\"battery_percent\","
         "\"chip_temperature_c\",\"vbus_present\",\"uptime_s\","
         "\"free_heap\"]}\n",
@@ -108,7 +129,7 @@ static void send_info(uint32_t request_id)
         EPD_LANDSCAPE_WIDTH,
         EPD_LANDSCAPE_HEIGHT,
         EPD_FRAME_BYTES,
-        MAX_PARTIAL_REFRESHES
+        offline_scene_available() ? "true" : "false"
     );
 }
 
@@ -214,10 +235,17 @@ static void set_config(const char *line)
     send_config((uint32_t)request_id);
 }
 
+static void update_offline_sensors(void)
+{
+    sensors_read(&s_offline_sensors);
+    s_offline_sensors_valid = true;
+    s_last_sensor_read_us = esp_timer_get_time();
+}
+
 static void send_sensors(uint32_t request_id)
 {
-    sensor_snapshot_t snapshot;
-    sensors_read(&snapshot);
+    update_offline_sensors();
+    const sensor_snapshot_t snapshot = s_offline_sensors;
 
     char battery_mv[24];
     char battery_percent[24];
@@ -260,12 +288,51 @@ static void send_sensors(uint32_t request_id)
     );
 }
 
+static esp_err_t display_with_policy(
+    const uint8_t *frame,
+    epd_rotation_t rotation,
+    bool request_partial,
+    epd_refresh_result_t *refresh,
+    uint32_t *elapsed_ms
+)
+{
+    device_config_t config;
+    device_config_get(&config);
+    const int64_t now = esp_timer_get_time();
+    const bool full_refresh_due =
+        s_last_full_refresh_us == 0 ||
+        now - s_last_full_refresh_us >= (int64_t)config.full_refresh_ms * 1000;
+    const bool allow_partial =
+        request_partial && config.partial_refresh_enabled && !full_refresh_due;
+
+    const int64_t started = now;
+    const esp_err_t result = epd_display_landscape_update(
+        frame,
+        rotation,
+        allow_partial,
+        refresh
+    );
+    if (elapsed_ms != NULL) {
+        *elapsed_ms = (uint32_t)((esp_timer_get_time() - started) / 1000);
+    }
+    if (result != ESP_OK) return result;
+
+    if (refresh->mode == EPD_REFRESH_FULL) {
+        s_last_full_refresh_us = esp_timer_get_time();
+        s_partial_refresh_count = 0;
+    } else if (refresh->mode == EPD_REFRESH_PARTIAL) {
+        ++s_partial_refresh_count;
+    }
+    return ESP_OK;
+}
+
 static void finish_frame(void)
 {
     const uint32_t actual_crc = ink_crc32(s_frame, s_frame_state.expected_length);
     const uint32_t request_id = s_frame_state.request_id;
     const epd_rotation_t rotation = s_frame_state.rotation;
     const bool request_partial = s_frame_state.request_partial;
+    const bool preserve_offline_scene = s_frame_state.preserve_offline_scene;
     const uint32_t expected_crc = s_frame_state.expected_crc;
     memset(&s_frame_state, 0, sizeof(s_frame_state));
 
@@ -274,25 +341,15 @@ static void finish_frame(void)
         return;
     }
 
-    device_config_t config;
-    device_config_get(&config);
-    const int64_t now = esp_timer_get_time();
-    const bool full_refresh_due =
-        s_last_full_refresh_us == 0 ||
-        now - s_last_full_refresh_us >= (int64_t)config.full_refresh_ms * 1000;
-    const bool allow_partial =
-        request_partial && config.partial_refresh_enabled &&
-        !full_refresh_due && s_partial_refresh_count < MAX_PARTIAL_REFRESHES;
-
-    const int64_t started = now;
     epd_refresh_result_t refresh = {0};
-    const esp_err_t result = epd_display_landscape_update(
+    uint32_t elapsed_ms = 0;
+    const esp_err_t result = display_with_policy(
         s_frame,
         rotation,
-        allow_partial,
-        &refresh
+        request_partial,
+        &refresh,
+        &elapsed_ms
     );
-    const uint32_t elapsed_ms = (uint32_t)((esp_timer_get_time() - started) / 1000);
     if (result != ESP_OK) {
         serial_printf(
             "{\"type\":\"frame\",\"id\":%lu,\"ok\":false,"
@@ -303,15 +360,13 @@ static void finish_frame(void)
         return;
     }
 
-    const char *mode = "none";
-    if (refresh.mode == EPD_REFRESH_FULL) {
-        mode = "full";
-        s_last_full_refresh_us = esp_timer_get_time();
-        s_partial_refresh_count = 0;
-    } else if (refresh.mode == EPD_REFRESH_PARTIAL) {
-        mode = "partial";
-        ++s_partial_refresh_count;
+    s_last_screen_refresh_us = esp_timer_get_time();
+    if (!preserve_offline_scene && offline_scene_available()) {
+        (void)offline_scene_clear();
     }
+    const char *mode = refresh.mode == EPD_REFRESH_FULL
+        ? "full"
+        : refresh.mode == EPD_REFRESH_PARTIAL ? "partial" : "none";
 
     serial_printf(
         "{\"type\":\"frame\",\"id\":%lu,\"ok\":true,"
@@ -377,10 +432,98 @@ static void begin_frame(const char *line)
         .received_length = 0,
         .rotation = (epd_rotation_t)rotation,
         .request_partial = strcmp(mode, "full") != 0,
+        .preserve_offline_scene =
+            offline_scene_available() &&
+            esp_timer_get_time() <= s_scene_for_next_frame_until_us,
+        .last_byte_time_us = esp_timer_get_time(),
+    };
+    s_scene_for_next_frame_until_us = 0;
+    serial_printf(
+        "{\"type\":\"ready\",\"id\":%lu,\"ok\":true,\"bytes\":%lu}\n",
+        request_id,
+        length
+    );
+}
+
+static void finish_scene(void)
+{
+    uint8_t *data = s_scene_state.data;
+    const size_t length = s_scene_state.expected_length;
+    const uint32_t request_id = s_scene_state.request_id;
+    const uint32_t expected_crc = s_scene_state.expected_crc;
+    const uint32_t actual_crc = ink_crc32(data, length);
+    memset(&s_scene_state, 0, sizeof(s_scene_state));
+
+    if (actual_crc != expected_crc) {
+        free(data);
+        send_error(request_id, "CRC_MISMATCH", "scene checksum mismatch");
+        return;
+    }
+
+    const esp_err_t result = offline_scene_install(data, length);
+    if (result != ESP_OK) {
+        free(data);
+        serial_printf(
+            "{\"type\":\"scene\",\"id\":%lu,\"ok\":false,"
+            "\"code\":\"SCENE_SAVE_FAILED\",\"espError\":%d}\n",
+            (unsigned long)request_id,
+            (int)result
+        );
+        return;
+    }
+
+    update_offline_sensors();
+    s_last_screen_refresh_us = esp_timer_get_time();
+    s_scene_for_next_frame_until_us = esp_timer_get_time() + 15000000LL;
+    serial_printf(
+        "{\"type\":\"scene\",\"id\":%lu,\"ok\":true,"
+        "\"bytes\":%lu,\"crc32\":\"%08lx\"}\n",
+        (unsigned long)request_id,
+        (unsigned long)length,
+        (unsigned long)actual_crc
+    );
+}
+
+static void begin_scene(const char *line)
+{
+    unsigned long request_id = 0;
+    unsigned long length = 0;
+    unsigned long expected_crc = 0;
+    if (sscanf(
+            line,
+            "SCENE %lu %lu %lx",
+            &request_id,
+            &length,
+            &expected_crc
+        ) != 3) {
+        send_error(0, "BAD_SCENE_HEADER", "expected SCENE id length crc");
+        return;
+    }
+    if (length < 16U + EPD_FRAME_BYTES || length > OFFLINE_SCENE_MAX_BYTES) {
+        send_error(
+            (uint32_t)request_id,
+            "BAD_SCENE_SIZE",
+            "scene size is outside the supported range"
+        );
+        return;
+    }
+
+    uint8_t *data = malloc((size_t)length);
+    if (data == NULL) {
+        send_error((uint32_t)request_id, "NO_MEMORY", "cannot allocate scene buffer");
+        return;
+    }
+    s_scene_state = (scene_receive_state_t){
+        .active = true,
+        .request_id = (uint32_t)request_id,
+        .expected_crc = (uint32_t)expected_crc,
+        .expected_length = (size_t)length,
+        .data = data,
         .last_byte_time_us = esp_timer_get_time(),
     };
     serial_printf(
-        "{\"type\":\"ready\",\"id\":%lu,\"ok\":true,\"bytes\":%lu}\n",
+        "{\"type\":\"ready\",\"id\":%lu,\"ok\":true,"
+        "\"kind\":\"scene\",\"bytes\":%lu}\n",
         request_id,
         length
     );
@@ -409,6 +552,10 @@ static void handle_line(char *line)
         begin_frame(line);
         return;
     }
+    if (strncmp(line, "SCENE ", 6) == 0) {
+        begin_scene(line);
+        return;
+    }
 
     const uint32_t request_id = parse_request_id(line);
     if (strncmp(line, "HELLO ", 6) == 0 || strncmp(line, "INFO ", 5) == 0) {
@@ -426,7 +573,9 @@ static void handle_line(char *line)
         set_config(line);
     } else if (strncmp(line, "CLEAR ", 6) == 0) {
         const int64_t started = esp_timer_get_time();
-        const esp_err_t result = epd_clear();
+        esp_err_t result = ESP_OK;
+        if (offline_scene_available()) result = offline_scene_clear();
+        if (result == ESP_OK) result = epd_clear();
         serial_printf(
             "{\"type\":\"clear\",\"id\":%lu,\"ok\":%s,"
             "\"espError\":%d,\"refreshMs\":%lu}\n",
@@ -437,7 +586,9 @@ static void handle_line(char *line)
         );
         if (result == ESP_OK) {
             s_last_full_refresh_us = esp_timer_get_time();
+            s_last_screen_refresh_us = s_last_full_refresh_us;
             s_partial_refresh_count = 0;
+            s_scene_for_next_frame_until_us = 0;
         }
     } else {
         send_error(request_id, "UNKNOWN_COMMAND", "unknown command");
@@ -448,6 +599,24 @@ static void consume_bytes(const uint8_t *data, size_t length)
 {
     size_t offset = 0;
     while (offset < length) {
+        if (s_scene_state.active) {
+            const size_t remaining =
+                s_scene_state.expected_length - s_scene_state.received_length;
+            const size_t available = length - offset;
+            const size_t take = remaining < available ? remaining : available;
+            memcpy(
+                s_scene_state.data + s_scene_state.received_length,
+                data + offset,
+                take
+            );
+            s_scene_state.received_length += take;
+            s_scene_state.last_byte_time_us = esp_timer_get_time();
+            offset += take;
+            if (s_scene_state.received_length == s_scene_state.expected_length) {
+                finish_scene();
+            }
+            continue;
+        }
         if (s_frame_state.active) {
             const size_t remaining =
                 s_frame_state.expected_length - s_frame_state.received_length;
@@ -485,6 +654,62 @@ static void consume_bytes(const uint8_t *data, size_t length)
     }
 }
 
+static bool interval_due(int64_t now, int64_t previous, uint32_t interval_ms)
+{
+    return previous == 0 || now - previous >= (int64_t)interval_ms * 1000;
+}
+
+static void refresh_offline_scene_if_due(void)
+{
+    if (s_frame_state.active || s_scene_state.active ||
+        !offline_scene_available()) {
+        return;
+    }
+
+    device_config_t config;
+    device_config_get(&config);
+    const int64_t now = esp_timer_get_time();
+    if (now < s_offline_refresh_not_before_us) return;
+    const bool sampled_vbus = sensors_vbus_present();
+    bool vbus_changed =
+        s_offline_sensors_valid && sampled_vbus != s_offline_sensors.vbus_present;
+
+    if (!s_offline_sensors_valid ||
+        interval_due(now, s_last_sensor_read_us, config.data_refresh_ms)) {
+        const bool previous_vbus = s_offline_sensors.vbus_present;
+        const bool had_snapshot = s_offline_sensors_valid;
+        update_offline_sensors();
+        vbus_changed = had_snapshot && previous_vbus != s_offline_sensors.vbus_present;
+    } else if (vbus_changed) {
+        /* VBUS is cheap to poll and should be reflected immediately on unplug. */
+        s_offline_sensors.vbus_present = sampled_vbus;
+    }
+
+    if (!vbus_changed &&
+        !interval_due(now, s_last_screen_refresh_us, config.screen_refresh_ms)) {
+        return;
+    }
+
+    epd_rotation_t rotation = EPD_ROTATE_90;
+    if (offline_scene_render(
+            &s_offline_sensors,
+            s_offline_frame,
+            &rotation
+        ) != ESP_OK) {
+        return;
+    }
+    epd_refresh_result_t refresh = {0};
+    if (display_with_policy(
+            s_offline_frame,
+            rotation,
+            true,
+            &refresh,
+            NULL
+        ) == ESP_OK) {
+        s_last_screen_refresh_us = esp_timer_get_time();
+    }
+}
+
 esp_err_t protocol_run(void)
 {
     usb_serial_jtag_driver_config_t usb_config = {
@@ -496,6 +721,8 @@ esp_err_t protocol_run(void)
         "protocol",
         "usb serial jtag"
     );
+    /* Give a Web Serial client a short window to exchange HELLO after reboot. */
+    s_offline_refresh_not_before_us = esp_timer_get_time() + 2000000LL;
 
     uint8_t chunk[RX_CHUNK_SIZE];
     while (true) {
@@ -508,12 +735,20 @@ esp_err_t protocol_run(void)
             consume_bytes(chunk, (size_t)received);
         }
 
+        const int64_t now = esp_timer_get_time();
         if (s_frame_state.active &&
-            esp_timer_get_time() - s_frame_state.last_byte_time_us >
-                FRAME_RECEIVE_TIMEOUT_US) {
+            now - s_frame_state.last_byte_time_us > BINARY_RECEIVE_TIMEOUT_US) {
             const uint32_t request_id = s_frame_state.request_id;
             memset(&s_frame_state, 0, sizeof(s_frame_state));
             send_error(request_id, "FRAME_TIMEOUT", "frame transfer timed out");
         }
+        if (s_scene_state.active &&
+            now - s_scene_state.last_byte_time_us > BINARY_RECEIVE_TIMEOUT_US) {
+            const uint32_t request_id = s_scene_state.request_id;
+            free(s_scene_state.data);
+            memset(&s_scene_state, 0, sizeof(s_scene_state));
+            send_error(request_id, "SCENE_TIMEOUT", "scene transfer timed out");
+        }
+        refresh_offline_scene_if_due();
     }
 }

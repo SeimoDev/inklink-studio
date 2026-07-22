@@ -165,3 +165,8 @@ void sensors_read(sensor_snapshot_t *snapshot)
         }
     }
 }
+
+bool sensors_vbus_present(void)
+{
+    return gpio_get_level(BOARD_VBUS_GPIO) != 0;
+}

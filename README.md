@@ -8,6 +8,8 @@ InkLink Studio 是 MindReset Quote/0（ESP32-C3 + 296×152 黑白墨水屏）的
 
 访问 [https://eink.seimo.cn](https://eink.seimo.cn)，使用桌面版 Chrome 或 Edge 通过 USB 连接设备。
 
+需要单独下载一体化固件时，前往 [GitHub Releases](https://github.com/SeimoDev/inklink-studio/releases)。Release 固件与在线网页内置固件使用相同版本和 SHA-256。
+
 ## 工程结构
 
 ```text
@@ -79,7 +81,7 @@ idf.py build
 - 文字和传感器图层自由定位、样式调整、层级管理与项目 JSON 导入导出
 - 电池电压、电量、芯片温度、USB 状态、运行时间和可用内存读取
 - 从设备载入并保存 Wi-Fi、BLE、数据读取、屏幕更新及强制全刷间隔
-- UC8251D 变化区域局刷、周期全刷和无变化跳过，断开并重连 USB 后继续采用设备保存的刷新策略
+- UC8251D 变化区域局刷、周期全刷和无变化跳过；画面发送后即使断开 Web 或拔掉 USB，设备仍由电池供电、自主采样并按保存的策略刷新
 - 浏览器内置固件刷写、本地固件载入及整颗 4 MB Flash 备份下载
 
 屏幕是黑白 1-bit 面板；网页中的灰阶效果通过抖动网点模拟，发送到设备的最终画面只有黑白两色。
@@ -90,10 +92,14 @@ idf.py build
 
 浏览器刷写会覆盖设备固件。仅对已确认采用相同板级引脚、UC8251D 屏幕和 4 MB Flash 的 Quote/0 设备操作。
 
+## 开源许可
+
+本项目以 [GNU General Public License v3.0](LICENSE)（SPDX：`GPL-3.0-only`）发布。第三方依赖继续适用各自的许可证。
+
 ## 文档
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)：Web-only 工程架构和数据流
 - [`docs/HARDWARE.md`](docs/HARDWARE.md)：屏幕、GPIO、电源时序与局刷依据
-- [`docs/PROTOCOL.md`](docs/PROTOCOL.md)：USB 串口协议 v2
+- [`docs/PROTOCOL.md`](docs/PROTOCOL.md)：USB 串口协议 v3
 - [`firmware/README.md`](firmware/README.md)：固件构建与浏览器固件资源生成
 - [`web/README.md`](web/README.md)：前端开发、测试和生产构建

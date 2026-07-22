@@ -17,3 +17,4 @@ typedef struct {
 
 esp_err_t sensors_init(void);
 void sensors_read(sensor_snapshot_t *snapshot);
+bool sensors_vbus_present(void);

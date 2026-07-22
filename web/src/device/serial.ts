@@ -111,22 +111,22 @@ export class InkSerial {
   }
 
   async getInfo(): Promise<DeviceInfo> {
-    const response = await this.command("HELLO", "hello", 3000);
+    const response = await this.command("HELLO", "hello", 15000);
     return response as unknown as DeviceInfo;
   }
 
   async getSensors(): Promise<SensorValues> {
-    const response = await this.command("SENSORS", "sensors", 3000);
+    const response = await this.command("SENSORS", "sensors", 15000);
     return parseSensorValues(response.values);
   }
 
   async getConfig(): Promise<DeviceConfig> {
-    const response = await this.command("CONFIG", "config", 3000);
+    const response = await this.command("CONFIG", "config", 15000);
     return response as unknown as DeviceConfig;
   }
 
   async setConfig(config: DeviceConfig): Promise<DeviceConfig> {
-    const response = await this.command("SET_CONFIG", "config", 10000, [
+    const response = await this.command("SET_CONFIG", "config", 20000, [
       config.wifiEnabled ? 1 : 0,
       config.bluetoothEnabled ? 1 : 0,
       Math.round(config.dataRefreshMs),
@@ -138,7 +138,7 @@ export class InkSerial {
   }
 
   async ping(): Promise<void> {
-    await this.command("PING", "pong", 2000);
+    await this.command("PING", "pong", 15000);
   }
 
   async clear(): Promise<DeviceResponse> {
@@ -156,8 +156,8 @@ export class InkSerial {
       }
       const id = this.allocateId();
       const checksum = crc32(frame);
-      const ready = this.waitFor(id, "ready", 5000);
-      const completed = this.waitFor(id, "frame", 30000);
+      const ready = this.waitFor(id, "ready", 15000);
+      const completed = this.waitFor(id, "frame", 45000);
       await this.writeRaw(
         new TextEncoder().encode(
           `FRAME ${id} ${frame.length} ${checksum.toString(16).padStart(8, "0")} ${rotation} ${mode}\n`,
@@ -169,6 +169,26 @@ export class InkSerial {
         await this.writeRaw(frame.subarray(offset, Math.min(offset + 512, frame.length)));
       }
       return completed as Promise<FrameResponse>;
+    });
+  }
+
+  async sendScene(scene: Uint8Array): Promise<DeviceResponse> {
+    return this.exclusive(async () => {
+      const id = this.allocateId();
+      const checksum = crc32(scene);
+      const ready = this.waitFor(id, "ready", 15000);
+      const completed = this.waitFor(id, "scene", 20000);
+      await this.writeRaw(
+        new TextEncoder().encode(
+          `SCENE ${id} ${scene.length} ${checksum.toString(16).padStart(8, "0")}\n`,
+        ),
+      );
+      await ready;
+
+      for (let offset = 0; offset < scene.length; offset += 512) {
+        await this.writeRaw(scene.subarray(offset, Math.min(offset + 512, scene.length)));
+      }
+      return completed;
     });
   }
 

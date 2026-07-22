@@ -73,8 +73,10 @@ export interface DeviceInfo {
     partialRefresh: boolean;
     wifiSwitch: boolean;
     bluetoothSwitch: boolean;
+    offlineSensorRefresh?: boolean;
   };
   maxPartialRefreshes: number;
+  offlineSceneLoaded?: boolean;
   sensors: string[];
 }
 

@@ -264,6 +264,15 @@ export class CanvasEditor {
     return packMonochrome(this.context.getImageData(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT));
   }
 
+  getStaticFrame(): Uint8Array {
+    this.render(false);
+    const frame = packMonochrome(
+      this.context.getImageData(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT),
+    );
+    this.render();
+    return frame;
+  }
+
   async toPngBlob(): Promise<Blob> {
     this.render();
     return new Promise((resolve, reject) => {
@@ -311,7 +320,7 @@ export class CanvasEditor {
     this.onSelectionChange?.(null);
   }
 
-  render(): void {
+  render(includeSensorLayers = true): void {
     const ctx = this.context;
     ctx.save();
     ctx.fillStyle = "#ffffff";
@@ -338,7 +347,9 @@ export class CanvasEditor {
     }
 
     this.bounds.clear();
-    for (const layer of this.layers) this.drawLayer(ctx, layer);
+    for (const layer of this.layers) {
+      if (includeSensorLayers || layer.type !== "sensor") this.drawLayer(ctx, layer);
+    }
     this.forceBlackAndWhite(ctx);
     ctx.restore();
     this.drawOverlay();

@@ -4,9 +4,10 @@ idf_component_register(
         "crc32.c"
         "device_config.c"
         "epd_uc8251.c"
+        "offline_scene.c"
         "protocol.c"
         "radios.c"
         "sensors.c"
     INCLUDE_DIRS "."
-    REQUIRES bt driver esp_adc esp_timer esp_system esp_wifi nvs_flash
+    REQUIRES bt driver esp_adc esp_partition esp_timer esp_system esp_wifi nvs_flash
 )
