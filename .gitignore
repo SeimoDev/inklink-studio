@@ -1,0 +1,19 @@
+# Web dependencies and build output
+/web/node_modules/
+/web/dist/
+
+# ESP-IDF local output
+/firmware/build/
+/firmware/.pio/
+/firmware/sdkconfig
+/firmware/sdkconfig.*
+!/firmware/sdkconfig.defaults
+
+# Local tooling
+.DS_Store
+*.log
+
+# Device-specific dumps and metadata are private and must never be published.
+/backups/
+/private/
+/secrets/

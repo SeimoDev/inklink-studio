@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f1e8" />
+    <meta
+      name="description"
+      content="InkLink Studio — 通过 USB 有线连接设计并发送 ESP32-C3 墨水屏画面"
+    />
+    <title>InkLink Studio</title>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="InkLink Studio 首页">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>
+          <strong>InkLink</strong>
+          <small>STUDIO / 296 × 152</small>
+        </span>
+      </a>
+
+      <div class="connection-cluster">
+        <div class="connection-state" id="connectionState" title="设备连接状态">
+          <span class="status-dot" id="connectionDot"></span>
+          <span id="connectionText">设备未连接</span>
+        </div>
+        <button class="button button-primary" id="connectBtn" type="button">
+          <span class="usb-icon" aria-hidden="true">⌁</span>
+          连接 USB
+        </button>
+      </div>
+    </header>
+
+    <main class="studio-layout">
+      <aside class="panel controls-panel" aria-label="图像和图层控制">
+        <section class="panel-section device-compact">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">DEVICE</span>
+              <h2>有线设备</h2>
+            </div>
+            <button class="icon-button" id="refreshSensorsBtn" type="button" title="刷新传感器" disabled>
+              ↻
+            </button>
+          </div>
+          <div class="device-message" id="deviceMessage">
+            使用 Chrome 或 Edge，通过 USB-C 数据线连接设备。
+          </div>
+          <dl class="device-details" id="deviceDetails" hidden>
+            <div><dt>固件</dt><dd id="firmwareValue">—</dd></div>
+            <div><dt>屏幕</dt><dd id="panelValue">—</dd></div>
+            <div><dt>协议</dt><dd id="protocolValue">—</dd></div>
+          </dl>
+        </section>
+
+        <section class="panel-section device-config-section">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">DEVICE CONFIG</span>
+              <h2>设备与刷新</h2>
+            </div>
+            <button class="icon-button" id="reloadConfigBtn" type="button" title="重新从设备读取配置" disabled>↻</button>
+          </div>
+          <p class="section-note" id="configMessage">连接设备后自动读取当前配置。</p>
+          <form id="deviceConfigForm" class="device-config-form">
+            <label class="toggle-field full-field">
+              <span><b>Wi‑Fi 射频</b><small id="wifiRuntimeState">未连接</small></span>
+              <input id="wifiEnabledInput" class="device-config-control" type="checkbox" disabled /><i aria-hidden="true"></i>
+            </label>
+            <label class="toggle-field full-field">
+              <span><b>蓝牙 LE</b><small id="bluetoothRuntimeState">未连接</small></span>
+              <input id="bluetoothEnabledInput" class="device-config-control" type="checkbox" disabled /><i aria-hidden="true"></i>
+            </label>
+            <div class="refresh-fields">
+              <label class="field"><span>读取数据</span><input id="dataRefreshInput" class="device-config-control" type="number" min="1" max="86400" step="1" value="30" disabled /><em>秒</em></label>
+              <label class="field"><span>更新屏幕</span><input id="screenRefreshInput" class="device-config-control" type="number" min="10" max="86400" step="1" value="60" disabled /><em>秒</em></label>
+              <label class="field full-field"><span>强制全屏刷新</span><input id="fullRefreshInput" class="device-config-control" type="number" min="180" max="86400" step="1" value="1800" disabled /><em>秒</em></label>
+            </div>
+            <label class="toggle-field full-field">
+              <span><b>局部刷新</b><small id="partialSupportState">等待检测屏幕</small></span>
+              <input id="partialRefreshInput" class="device-config-control" type="checkbox" disabled checked /><i aria-hidden="true"></i>
+            </label>
+            <label class="toggle-field full-field">
+              <span><b>网页自动更新</b><small>网页保持打开并连接时生效</small></span>
+              <input id="autoRefreshInput" type="checkbox" checked /><i aria-hidden="true"></i>
+            </label>
+            <button class="button button-primary full-button" id="saveConfigBtn" type="submit" disabled>保存到设备</button>
+          </form>
+        </section>
+
+        <section class="panel-section firmware-section">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">FIRMWARE</span>
+              <h2>浏览器刷写与备份</h2>
+            </div>
+            <span class="type-badge">4 MB</span>
+          </div>
+          <p class="section-note">操作在本机浏览器完成，不会上传固件或备份。备份可能含 Wi‑Fi 凭据，请妥善保管。</p>
+          <input id="firmwareFileInput" type="file" accept=".bin,application/octet-stream" hidden />
+          <div class="firmware-source">
+            <strong id="firmwareFileName">内置 InkLink 一体化固件</strong>
+            <small id="firmwareFileMeta">刷写地址 0x0 · DIO · 4 MB</small>
+          </div>
+          <div class="firmware-source-actions">
+            <button class="button button-quiet" id="chooseFirmwareBtn" type="button">载入本地固件</button>
+            <button class="text-button" id="useBuiltInFirmwareBtn" type="button" hidden>使用内置固件</button>
+          </div>
+          <div class="firmware-buttons">
+            <button class="button button-quiet" id="backupFirmwareBtn" type="button">备份当前固件</button>
+            <button class="button button-send" id="flashFirmwareBtn" type="button">刷写固件</button>
+          </div>
+          <div class="flash-progress-wrap" id="flashProgressWrap" hidden>
+            <progress id="flashProgress" max="100" value="0"></progress>
+            <small id="flashStatus">准备连接设备</small>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">BACKGROUND</span>
+              <h2>背景图像</h2>
+            </div>
+            <button class="text-button" id="resetImageBtn" type="button">重置参数</button>
+          </div>
+
+          <div class="dropzone" id="dropzone" tabindex="0" role="button">
+            <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+            <div class="drop-icon" aria-hidden="true">↥</div>
+            <div><strong>拖入图片</strong><span>或点击选择 · PNG / JPEG / WebP</span></div>
+          </div>
+          <div class="inline-actions image-actions" id="imageActions" hidden>
+            <button class="button button-quiet" id="chooseImageBtn" type="button">更换图片</button>
+            <button class="button button-quiet danger-text" id="removeImageBtn" type="button">移除</button>
+          </div>
+
+          <div class="control-grid">
+            <label class="field full-field">
+              <span>灰阶算法</span>
+              <select id="ditherInput">
+                <option value="floyd-steinberg">Floyd–Steinberg（细腻）</option>
+                <option value="atkinson">Atkinson（清爽）</option>
+                <option value="bayer4">Bayer 4×4（网点）</option>
+                <option value="threshold">阈值（纯黑白）</option>
+              </select>
+            </label>
+
+            <label class="range-field full-field">
+              <span><b>亮度</b><output id="brightnessValue">0</output></span>
+              <input id="brightnessInput" type="range" min="-100" max="100" value="0" />
+            </label>
+            <label class="range-field full-field">
+              <span><b>对比度</b><output id="contrastValue">0</output></span>
+              <input id="contrastInput" type="range" min="-100" max="100" value="0" />
+            </label>
+            <label class="range-field full-field">
+              <span><b>Gamma</b><output id="gammaValue">1.0</output></span>
+              <input id="gammaInput" type="range" min="0.2" max="3" step="0.1" value="1" />
+            </label>
+            <label class="range-field full-field">
+              <span><b>黑白阈值</b><output id="thresholdValue">128</output></span>
+              <input id="thresholdInput" type="range" min="0" max="255" value="128" />
+            </label>
+            <label class="range-field full-field">
+              <span><b>裁剪缩放</b><output id="zoomValue">100%</output></span>
+              <input id="zoomInput" type="range" min="0.25" max="4" step="0.05" value="1" />
+            </label>
+            <label class="toggle-field full-field">
+              <span><b>反转黑白</b><small>只影响背景图片</small></span>
+              <input id="invertInput" type="checkbox" /><i aria-hidden="true"></i>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel-section layers-section">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">LAYERS</span>
+              <h2>画面图层</h2>
+            </div>
+            <span class="count-badge" id="layerCount">0</span>
+          </div>
+          <div class="add-layer-row">
+            <button class="button button-add" id="addTextBtn" type="button"><span>T</span> 添加文字</button>
+            <button class="button button-add" id="addSensorBtn" type="button"><span>⌁</span> 传感器</button>
+          </div>
+          <div class="layer-list" id="layerList">
+            <div class="empty-list">还没有图层</div>
+          </div>
+        </section>
+      </aside>
+
+      <section class="workspace" aria-label="墨水屏画面预览">
+        <div class="workspace-toolbar">
+          <div>
+            <span class="eyebrow">LIVE CANVAS</span>
+            <h1>屏幕预览</h1>
+          </div>
+          <div class="canvas-meta">
+            <span><i class="meta-dot"></i>1-BIT</span>
+            <span>296 × 152 PX</span>
+            <label>
+              方向
+              <select id="rotationInput" aria-label="屏幕方向">
+                <option value="90">90°</option>
+                <option value="270">270°</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="device-stage">
+          <div class="ambient-shadow"></div>
+          <div class="epaper-device">
+            <div class="device-label"><span>INK / 02</span><span>USB-C</span></div>
+            <div class="screen-bezel">
+              <div class="canvas-stack" id="canvasStack">
+                <canvas id="displayCanvas" width="296" height="152"></canvas>
+                <canvas id="overlayCanvas" width="296" height="152"></canvas>
+              </div>
+            </div>
+            <div class="device-footer"><span>●</span> E-PAPER DISPLAY <b>296 × 152</b></div>
+          </div>
+          <p class="canvas-help">拖动画面移动图层或裁剪位置 · 滚轮缩放背景图片</p>
+        </div>
+
+        <div class="send-dock">
+          <div class="send-status">
+            <span class="send-indicator" id="sendIndicator"></span>
+            <div><strong id="sendStatusTitle">画面已就绪</strong><small id="sendStatusDetail">连接设备后即可发送</small></div>
+          </div>
+          <div class="send-actions">
+            <button class="button button-quiet" id="clearBtn" type="button" disabled>清空屏幕</button>
+            <button class="button button-send" id="sendBtn" type="button" disabled>
+              发送到屏幕 <span>→</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel inspector-panel" aria-label="图层属性和数据">
+        <section class="panel-section inspector-section">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">INSPECTOR</span>
+              <h2>图层属性</h2>
+            </div>
+            <span class="type-badge" id="layerTypeBadge" hidden>TEXT</span>
+          </div>
+
+          <div class="inspector-empty" id="inspectorEmpty">
+            <div class="crosshair-icon" aria-hidden="true">⌖</div>
+            <strong>选择一个图层</strong>
+            <span>点击画布中的文字或数据，调整位置和样式。</span>
+          </div>
+
+          <form id="inspectorForm" class="inspector-form" hidden>
+            <label class="field full-field" id="textFieldWrap">
+              <span>显示文字</span>
+              <textarea id="layerTextInput" rows="2" maxlength="120"></textarea>
+            </label>
+
+            <div id="sensorFieldWrap" class="sensor-fields" hidden>
+              <label class="field full-field">
+                <span>数据来源</span>
+                <select id="sensorKeyInput"></select>
+              </label>
+              <div class="two-column">
+                <label class="field"><span>前缀</span><input id="prefixInput" maxlength="24" /></label>
+                <label class="field"><span>后缀</span><input id="suffixInput" maxlength="12" /></label>
+              </div>
+              <div class="two-column">
+                <label class="field"><span>无数据时</span><input id="fallbackInput" maxlength="16" /></label>
+                <label class="field"><span>小数位</span><input id="decimalsInput" type="number" min="0" max="4" /></label>
+              </div>
+            </div>
+
+            <div class="property-group">
+              <h3>位置与尺寸</h3>
+              <div class="three-column">
+                <label class="field compact"><span>X</span><input id="xInput" type="number" /></label>
+                <label class="field compact"><span>Y</span><input id="yInput" type="number" /></label>
+                <label class="field compact"><span>字号</span><input id="fontSizeInput" type="number" min="6" max="96" /></label>
+              </div>
+            </div>
+
+            <div class="property-group">
+              <h3>排版样式</h3>
+              <label class="field full-field">
+                <span>字体</span>
+                <select id="fontFamilyInput">
+                  <option value="system-ui, sans-serif">无衬线</option>
+                  <option value="ui-serif, Georgia, serif">衬线</option>
+                  <option value="ui-monospace, SFMono-Regular, Menlo, monospace">等宽</option>
+                </select>
+              </label>
+              <div class="two-column">
+                <label class="field"><span>文字颜色</span><select id="colorInput"><option value="black">黑色</option><option value="white">白色</option></select></label>
+                <label class="field"><span>背景</span><select id="backgroundInput"><option value="transparent">透明</option><option value="white">白色</option><option value="black">黑色</option></select></label>
+              </div>
+              <div class="two-column align-end">
+                <label class="field"><span>内边距</span><input id="paddingInput" type="number" min="0" max="24" /></label>
+                <label class="check-field"><input id="boldInput" type="checkbox" /><span>粗体</span></label>
+              </div>
+            </div>
+
+            <div class="layer-actions">
+              <button class="button button-quiet" id="layerDownBtn" type="button" title="下移一层">↓</button>
+              <button class="button button-quiet" id="layerUpBtn" type="button" title="上移一层">↑</button>
+              <button class="button button-quiet grow" id="duplicateLayerBtn" type="button">复制图层</button>
+              <button class="icon-button danger-text" id="deleteLayerBtn" type="button" title="删除图层">⌫</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel-section data-section">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">DATA</span>
+              <h2>传感器数据</h2>
+            </div>
+            <span class="live-badge"><i></i> PREVIEW</span>
+          </div>
+          <div class="sensor-list" id="sensorList">
+            <div class="empty-list">连接设备以读取实时数据</div>
+          </div>
+          <form class="custom-sensor-form" id="customSensorForm">
+            <label class="field"><span>自定义键名</span><input id="customSensorKey" placeholder="room_temp" pattern="[A-Za-z0-9_\-]+" required /></label>
+            <label class="field small-value"><span>数值</span><input id="customSensorValue" type="number" step="any" placeholder="23.5" required /></label>
+            <button class="icon-button add-data-button" type="submit" title="添加自定义数据">＋</button>
+          </form>
+        </section>
+
+        <section class="panel-section project-section">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">PROJECT</span>
+              <h2>保存与导出</h2>
+            </div>
+          </div>
+          <input id="projectInput" type="file" accept="application/json,.json" hidden />
+          <div class="project-buttons">
+            <button class="button button-quiet" id="saveProjectBtn" type="button">保存项目</button>
+            <button class="button button-quiet" id="loadProjectBtn" type="button">打开项目</button>
+            <button class="button button-quiet full-button" id="exportPngBtn" type="button">导出 1-bit PNG</button>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
